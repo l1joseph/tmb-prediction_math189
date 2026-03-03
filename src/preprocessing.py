@@ -126,6 +126,8 @@ def compute_tmb(
     df["tmb"] = df[mutation_col] / exome_size
     df["log_tmb"] = np.log1p(df["tmb"])
     df["tmb_high"] = (df["tmb"] >= 10).astype(int)
+    # Flag hypermutators (TMB > 50 mut/Mb — POLE/MSI-H outliers)
+    df["hypermutator"] = (df["tmb"] > 50).astype(int)
     return df
 
 
