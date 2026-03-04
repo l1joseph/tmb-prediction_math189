@@ -1,0 +1,262 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{setspace}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{hyperref}
+\usepackage{float}
+
+\onehalfspacing
+
+\title{First Draft Report: Pan-Cancer Tumor Mutational Burden Prediction}
+\author{}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This report presents a first-pass analysis of tumor mutational burden (TMB) across The Cancer Genome Atlas (TCGA) Pan-Cancer Atlas cohort. The project integrates clinical and genomic summaries from multiple public sources into a unified patient-level dataset, then develops baseline statistical models for both continuous TMB and binary TMB-high status. The final processed cohort contains 10,953 samples across 30 cancer types. We observe marked right-skew in raw TMB, strong between-cancer heterogeneity, and substantial association between elevated TMB and MSI-H status. Regression analyses suggest that cancer type and MSI status are dominant predictors, while age and copy-number burden provide smaller incremental signal after adjustment. This draft report documents the end-to-end data pipeline, exploratory analyses, model specifications, and current limitations to support a reproducible final write-up.
+\end{abstract}
+
+\section{Introduction}
+
+Tumor mutational burden (TMB), commonly measured as the number of somatic mutations per megabase of coding DNA, is a clinically relevant biomarker in immuno-oncology. A higher mutation burden may increase neoantigen load and has been associated with better response to immune checkpoint blockade in selected tumor contexts. In practice, direct TMB measurement requires sequencing resources that may be limited in some clinical settings. This motivates predictive modeling approaches that estimate TMB-related risk from routinely available clinicogenomic features.
+
+This project addresses that question in a TCGA Pan-Cancer setting. The high-level goals are:
+\begin{itemize}
+    \item Build a merged analysis-ready dataset from multiple sources.
+    \item Characterize TMB distributions across cancer types.
+    \item Quantify associations between TMB and candidate predictors.
+    \item Develop baseline predictive models for continuous TMB and TMB-high status.
+\end{itemize}
+
+The primary research questions are:
+\begin{enumerate}
+    \item Which patient-level variables explain the largest share of variation in TMB?
+    \item How well can a parsimonious model identify TMB-high tumors ($\geq 10$ mut/Mb)?
+    \item How sensitive are inferences to heavy-tailed outliers (hypermutators)?
+\end{enumerate}
+
+\section{Data Sources and Cohort Construction}
+
+\subsection{Raw Data Sources}
+Three primary sources are combined:
+\begin{enumerate}
+    \item TCGA-CDR clinical outcomes and demographics (Liu et al., 2018).
+    \item cBioPortal Pan-Cancer Atlas clinical/genomic attributes for 32 studies, including mutation count, fraction genome altered, aneuploidy score, and MSI metrics.
+    \item Taylor et al. aneuploidy/ABSOLUTE files with purity, ploidy, and genome-doubling information.
+\end{enumerate}
+
+From cBioPortal, the pipeline extracts a focused set of attributes (\texttt{MUTATION\_COUNT}, \texttt{FRACTION\_GENOME\_ALTERED}, \texttt{ANEUPLOIDY\_SCORE}, \texttt{MSI\_SCORE\_MANTIS}, \texttt{MSI\_SENSOR\_SCORE}, \texttt{CANCER\_TYPE}, \texttt{CANCER\_TYPE\_DETAILED}) and pivots from long format to one row per sample before patient-level harmonization.
+
+\subsection{Merge and Feature Engineering}
+Datasets are linked by TCGA patient barcode after harmonizing barcode formats (first 12 characters of sample IDs when needed) and de-duplicating to one row per patient where applicable. The merge order uses cBioPortal as the anchor table to preserve broad coverage of mutation-based variables. The following engineered outcomes are central to the analysis:
+\begin{align*}
+\text{TMB} &= \frac{\text{mutation count}}{30 \text{ Mb}} \\
+\log(\text{TMB}) &= \log(1 + \text{TMB}) \\
+\text{TMB-high} &= \mathbb{1}(\text{TMB} \ge 10)
+\end{align*}
+An additional indicator flags hypermutator tumors:
+\[
+\text{hypermutator} = \mathbb{1}(\text{TMB} > 50).
+\]
+
+MSI status is derived primarily from MANTIS score thresholds (\texttt{MSI-H} if score $\geq 0.4$, else \texttt{MSS}) and secondarily from MSIsensor when needed. Additional harmonization includes:
+\begin{itemize}
+    \item age coercion into \texttt{age\_at\_diagnosis},
+    \item sex normalization to uppercase categories,
+    \item cancer type normalization across source-specific names,
+    \item binary WGD status from genome-doubling annotations.
+\end{itemize}
+
+\subsection{Processed Dataset Snapshot}
+The processed dataset (\texttt{data/processed/tmb\_merged.csv}) contains:
+\begin{itemize}
+    \item 10,953 total samples
+    \item 104 variables
+    \item 30 cancer-type categories
+\end{itemize}
+Examples of high-frequency disease groups in this cohort include Breast Cancer, Non-Small Cell Lung Cancer, Esophagogastric Cancer, Colorectal Cancer, and Endometrial Cancer. High-level prevalence:
+\begin{itemize}
+    \item TMB-high prevalence: approximately 11.5\%
+    \item Hypermutator prevalence: approximately 1.7\%
+\end{itemize}
+For the core multivariable model variable set (\texttt{log\_tmb}, age, cancer type, sex, MSI status, aneuploidy score, fraction genome altered), approximately 9,015 complete cases are available.
+
+\subsection{Data Completeness and Missingness}
+Missingness is uneven and concentrated in specific domains. In key modeling variables, approximate missingness is:
+\begin{itemize}
+    \item \texttt{log\_tmb}: 7.9\%
+    \item \texttt{age\_at\_diagnosis}: 1.3\%
+    \item \texttt{msi\_status}: 11.3\%
+    \item \texttt{aneuploidy\_score}: 4.8\%
+    \item \texttt{fraction\_genome\_altered}: 1.8\%
+\end{itemize}
+Several non-core clinical outcome fields (e.g., recurrence detail fields and margin status) show substantially higher missingness and are not used as primary predictors in this draft.
+
+\section{Exploratory Data Analysis}
+
+Exploratory analysis (Notebook 02) focuses on:
+\begin{itemize}
+    \item Summary statistics for continuous and categorical variables.
+    \item Distribution of raw TMB and $\log(\text{TMB})$.
+    \item Between-cancer variation in TMB (box/violin plots).
+    \item Bivariate relationships between $\log(\text{TMB})$ and predictors.
+    \item Correlation structure among genomic and clinical covariates.
+\end{itemize}
+
+In the processed data, raw TMB has a long right tail (median $\approx 1.97$, 75th percentile $\approx 4.47$, maximum $> 800$ mut/Mb), which strongly motivates transformation for linear modeling. Initial EDA findings:
+\begin{itemize}
+    \item Raw TMB is strongly right-skewed; log transformation improves symmetry.
+    \item Median TMB differs substantially across cancer types.
+    \item MSI-H tumors tend to have higher TMB than MSS tumors.
+    \item Aneuploidy and fraction genome altered show non-trivial correlation, motivating multicollinearity checks.
+\end{itemize}
+
+The EDA stage is also used to define candidate interaction terms and identify influential observations before formal model interpretation.
+
+\section{Modeling Strategy}
+
+\subsection{Linear Regression for Continuous Outcome}
+Outcome: $\log(\text{TMB})$.
+
+A progressive modeling strategy is used to show incremental explanatory value:
+\begin{enumerate}
+    \item Age-only model.
+    \item Add cancer type.
+    \item Add sex.
+    \item Add MSI status.
+    \item Add aneuploidy score and fraction genome altered.
+\end{enumerate}
+
+The main additive model is:
+\[
+\log(\text{TMB}_i) =
+\beta_0 + \beta_1 \text{Age}_i + \boldsymbol{\beta}_2^\top \text{CancerType}_i +
+\beta_3 \text{Sex}_i + \beta_4 \text{MSI}_i + \beta_5 \text{Aneuploidy}_i +
+\beta_6 \text{FGA}_i + \epsilon_i.
+\]
+
+Additional analyses include:
+\begin{itemize}
+    \item Interaction terms (Age $\times$ Cancer Type, MSI $\times$ Aneuploidy).
+    \item Residual diagnostics with and without hypermutators.
+    \item Variance inflation factor (VIF) checks.
+    \item Robust regression sensitivity analyses.
+\end{itemize}
+
+Diagnostics include residual-vs-fitted trends, QQ behavior, leverage/influence statistics (Cook's distance and DFBETAS), heteroscedasticity checks (Breusch--Pagan), and normality checks (Shapiro--Wilk on subsamples when needed for computational practicality).
+
+\subsection{Logistic Regression for TMB-High Classification}
+Outcome: \texttt{tmb\_high} (1 if TMB $\ge 10$, else 0).
+
+Standard logistic regression is fit with the same predictor family as the linear model. Because rare cancer strata can induce (quasi-)complete separation, Firth bias-corrected logistic regression is also used for stability and finite estimates. Performance and calibration assessments include:
+\begin{itemize}
+    \item ROC/AUC
+    \item Confusion matrix
+    \item Likelihood-ratio tests
+    \item Calibration curves and Hosmer--Lemeshow-type checks
+\end{itemize}
+
+The standard logistic specification is:
+\[
+\log\left(\frac{\Pr(Y_i=1)}{1-\Pr(Y_i=1)}\right) =
+\alpha_0 + \alpha_1 \text{Age}_i + \boldsymbol{\alpha}_2^\top \text{CancerType}_i +
+\alpha_3 \text{Sex}_i + \alpha_4 \text{MSI}_i + \alpha_5 \text{Aneuploidy}_i +
+\alpha_6 \text{FGA}_i.
+\]
+Odds ratios are reported as $\exp(\hat{\alpha}_j)$ for interpretability.
+
+\section{Preliminary Results}
+
+\subsection{Main Signals}
+The strongest and most consistent predictors appear to be:
+\begin{enumerate}
+    \item Cancer type
+    \item MSI status
+\end{enumerate}
+These variables explain a large share of between-sample variation in TMB and dominate coefficient magnitude patterns in both continuous and binary outcome models. Age contributes a smaller, generally positive association consistent with cumulative mutational processes. Aneuploidy score and fraction genome altered add incremental signal, but their adjusted effects are weaker once cancer type and MSI are included.
+
+\subsection{Outliers and Model Behavior}
+Hypermutators (TMB $>50$) are uncommon ($\sim$1.7\%) but materially affect linear-model tail behavior. Excluding these observations reduces residual skew/kurtosis and improves QQ alignment, while preserving broad directional conclusions for core covariates. This supports reporting both ``full-cohort'' and ``outlier-robust'' views in the final version.
+
+\subsection{Clinical Interpretation}
+The logistic models provide a practical framework for estimating TMB-high risk, potentially supporting sequencing triage when resources are constrained. Firth logistic regression is particularly valuable in rare subtypes where standard maximum-likelihood estimation becomes unstable due to separation (e.g., near-0\% or near-100\% event strata).
+
+\subsection{What Is Still Missing for Final Results}
+This draft intentionally emphasizes structure and interpretation over final numeric reporting. The final report should insert:
+\begin{itemize}
+    \item adjusted $R^2$ progression table for linear models,
+    \item coefficient table (or forest plot) for key predictors,
+    \item AUC and calibration metrics for logistic models,
+    \item sensitivity table comparing all-samples vs hypermutator-excluded fits.
+\end{itemize}
+
+\section{Limitations}
+\begin{itemize}
+    \item Missingness is non-uniform across predictors (notably MSI-related fields).
+    \item The TMB definition here is proxy-based (mutation count / assumed exome size), which may differ from assay-specific clinical pipelines.
+    \item This draft emphasizes in-sample modeling and diagnostics; strict external validation is not yet included.
+    \item Potential sample-level duplication risk across modalities is reduced by de-duplication rules but should be re-checked against study-specific sample handling decisions.
+    \item Potential residual confounding remains across heterogeneous cancer populations.
+    \item Pan-cancer aggregation can mask subtype-specific biology; pooled coefficients should not be interpreted as universal within every disease context.
+\end{itemize}
+
+\section{Next Steps}
+\begin{enumerate}
+    \item Add train/validation/test splitting or repeated cross-validation with cancer-type-aware stratification.
+    \item Report discrimination and calibration metrics with confidence intervals.
+    \item Compare alternative learners (elastic net, gradient boosting) to regression baselines with identical feature sets.
+    \item Conduct subgroup-level error analysis (per cancer type, MSI subgroup, sex) to identify instability.
+    \item Add uncertainty-aware decision thresholds for potential triage use.
+    \item Formalize reproducible manuscript assets (auto-generated tables and figures from notebook outputs).
+\end{enumerate}
+
+\section{Proposed Figure and Table List}
+To convert this draft into a final manuscript, the following assets are recommended:
+\begin{itemize}
+    \item Figure 1: Cohort assembly and merge flow diagram.
+    \item Figure 2: Raw vs log-transformed TMB distributions.
+    \item Figure 3: TMB by cancer type (box/violin).
+    \item Figure 4: Linear model residual diagnostics (all vs hypermutator-excluded).
+    \item Figure 5: Logistic ROC and calibration plots (standard vs Firth where applicable).
+    \item Table 1: Cohort characteristics and missingness summary.
+    \item Table 2: Progressive linear model performance.
+    \item Table 3: Logistic model coefficients and odds ratios.
+\end{itemize}
+
+\section{Reproducibility Notes}
+Core analysis files:
+\begin{itemize}
+    \item \texttt{notebooks/01\_data\_preparation.ipynb}
+    \item \texttt{notebooks/02\_eda.ipynb}
+    \item \texttt{notebooks/03\_linear\_regression.ipynb}
+    \item \texttt{notebooks/04\_logistic\_regression.ipynb}
+    \item \texttt{notebooks/05\_diagnostics.ipynb}
+    \item \texttt{src/data\_loader.py}, \texttt{src/preprocessing.py}
+\end{itemize}
+
+Environment management is provided via \texttt{environment.yml}. The recommended execution order is:
+\begin{enumerate}
+    \item \texttt{01\_data\_preparation.ipynb}
+    \item \texttt{02\_eda.ipynb}
+    \item \texttt{03\_linear\_regression.ipynb}
+    \item \texttt{04\_logistic\_regression.ipynb}
+    \item \texttt{05\_diagnostics.ipynb}
+\end{enumerate}
+Artifacts from this sequence should be archived (tables, model summaries, and figure files) to enable deterministic manuscript generation.
+
+\section{References (Draft Placeholders)}
+\begin{enumerate}
+    \item Liu, J. et al. (2018). TCGA Clinical Data Resource.
+    \item cBioPortal for Cancer Genomics. \url{https://www.cbioportal.org/}
+    \item Taylor, A. M. et al. (2018). Genomic and Functional Approaches to Understanding Cancer Aneuploidy.
+    \item FDA guidance/resources related to TMB-high (TMB $\ge 10$ mut/Mb) indication context.
+\end{enumerate}
+
+\end{document}
