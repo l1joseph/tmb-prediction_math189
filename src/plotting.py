@@ -175,28 +175,94 @@ def plot_residual_diagnostics(
     fitted: np.ndarray,
     residuals: np.ndarray,
     model_name: str = "",
+    qq_residuals: np.ndarray | None = None,
+    qq_compare_residuals: np.ndarray | None = None,
+    qq_compare_label: str = "Comparison",
+    qq_show_ci: bool = True,
+    qq_ci_level: float = 0.95,
+    qq_max_points: int = 4000,
+    qq_random_state: int = 42,
 ) -> Figure:
     """Four-panel residual diagnostic plot.
 
-    Panels: residuals vs fitted, Q-Q plot, scale-location, leverage
-    (leverage placeholder uses standardized residuals).
+    Panels: residuals vs fitted, Q-Q plot, scale-location, residual histogram.
+    Q-Q can optionally use externally studentized residuals and overlay
+    a comparison set (e.g., hypermutators excluded).
 
     Args:
         fitted: Fitted/predicted values.
         residuals: Residuals from the model.
         model_name: Optional title prefix.
+        qq_residuals: Optional residual vector used only for Q-Q panel.
+            If None, uses ``residuals``.
+        qq_compare_residuals: Optional second residual vector to overlay
+            in the Q-Q panel.
+        qq_compare_label: Legend label for ``qq_compare_residuals``.
+        qq_show_ci: Whether to draw a simulation-based confidence envelope
+            for the primary Q-Q series.
+        qq_ci_level: Confidence level for Q-Q envelope.
+        qq_max_points: Max points displayed in Q-Q scatter (subsampled).
+        qq_random_state: Random seed for reproducible Q-Q subsampling.
 
     Returns:
         Matplotlib Figure.
     """
-    std_resid = (residuals - residuals.mean()) / residuals.std()
+    def _to_clean_array(arr: np.ndarray) -> np.ndarray:
+        vals = np.asarray(arr, dtype=float).reshape(-1)
+        return vals[np.isfinite(vals)]
+
+    def _qq_components(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray, float, float]:
+        y = np.sort(_to_clean_array(arr))
+        n = len(y)
+        if n < 2:
+            # Degenerate case: return a minimal identity mapping.
+            x = np.array([0.0])
+            return x, np.array([y[0] if n == 1 else 0.0]), 1.0, 0.0
+        probs = (np.arange(1, n + 1) - 0.5) / n
+        x = sp_stats.norm.ppf(probs)
+        slope, intercept = np.polyfit(x, y, 1)
+        return x, y, float(slope), float(intercept)
+
+    def _qq_envelope(
+        n: int,
+        slope: float,
+        intercept: float,
+        ci_level: float,
+        random_state: int,
+        n_sim: int = 300,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        rng = np.random.default_rng(random_state)
+        sims = rng.standard_normal((n_sim, n))
+        sims.sort(axis=1)
+        probs = (np.arange(1, n + 1) - 0.5) / n
+        x = sp_stats.norm.ppf(probs)
+        alpha = 1 - ci_level
+        lo = np.quantile(sims, alpha / 2, axis=0)
+        hi = np.quantile(sims, 1 - alpha / 2, axis=0)
+        # Match the fitted reference line scale/location.
+        lo = intercept + slope * lo
+        hi = intercept + slope * hi
+        return x, lo, hi
+
+    residuals_arr = np.asarray(residuals, dtype=float).reshape(-1)
+    fitted_arr = np.asarray(fitted, dtype=float).reshape(-1)
+    finite_main = np.isfinite(fitted_arr) & np.isfinite(residuals_arr)
+    resid_clean = residuals_arr[np.isfinite(residuals_arr)]
+    resid_std = resid_clean.std()
+    std_resid = (
+        (resid_clean - resid_clean.mean()) / resid_std
+        if resid_std > 0
+        else np.zeros_like(resid_clean)
+    )
     sqrt_abs_std = np.sqrt(np.abs(std_resid))
 
     fig, axes = plt.subplots(2, 2, figsize=(12, 10))
     title_prefix = f"{model_name} — " if model_name else ""
 
     # 1. Residuals vs Fitted
-    axes[0, 0].scatter(fitted, residuals, alpha=0.3, s=10, color="#4C72B0")
+    axes[0, 0].scatter(
+        fitted_arr[finite_main], residuals_arr[finite_main], alpha=0.3, s=10, color="#4C72B0"
+    )
     axes[0, 0].axhline(0, color="red", ls="--", lw=1)
     axes[0, 0].set_xlabel("Fitted Values")
     axes[0, 0].set_ylabel("Residuals")
@@ -205,22 +271,72 @@ def plot_residual_diagnostics(
     try:
         from statsmodels.nonparametric.smoothers_lowess import lowess
 
-        smooth = lowess(residuals, fitted, frac=0.3)
+        smooth = lowess(residuals_arr[finite_main], fitted_arr[finite_main], frac=0.3)
         axes[0, 0].plot(smooth[:, 0], smooth[:, 1], color="red", lw=2)
     except ImportError:
         pass
 
-    # 2. Q-Q Plot
-    sp_stats.probplot(residuals, dist="norm", plot=axes[0, 1])
+    # 2. Q-Q Plot (supports studentized residuals + comparison overlay)
+    qq_base = _to_clean_array(qq_residuals if qq_residuals is not None else residuals)
+    x, y, slope, intercept = _qq_components(qq_base)
+    rng = np.random.default_rng(qq_random_state)
+    if len(x) > qq_max_points:
+        idx = np.sort(rng.choice(len(x), size=qq_max_points, replace=False))
+        x_plot, y_plot = x[idx], y[idx]
+    else:
+        x_plot, y_plot = x, y
+    axes[0, 1].scatter(x_plot, y_plot, s=10, alpha=0.35, color="#4C72B0", label="Primary")
+    axes[0, 1].plot(x, intercept + slope * x, color="red", lw=2, label="Reference line")
+
+    if qq_show_ci and len(x) > 10:
+        x_ci, lo, hi = _qq_envelope(
+            n=len(x),
+            slope=slope,
+            intercept=intercept,
+            ci_level=qq_ci_level,
+            random_state=qq_random_state,
+        )
+        axes[0, 1].fill_between(
+            x_ci,
+            lo,
+            hi,
+            color="red",
+            alpha=0.12,
+            linewidth=0,
+            label=f"{int(qq_ci_level * 100)}% envelope",
+        )
+
+    if qq_compare_residuals is not None:
+        x2, y2, slope2, intercept2 = _qq_components(qq_compare_residuals)
+        if len(x2) > qq_max_points:
+            idx2 = np.sort(rng.choice(len(x2), size=qq_max_points, replace=False))
+            x2_plot, y2_plot = x2[idx2], y2[idx2]
+        else:
+            x2_plot, y2_plot = x2, y2
+        axes[0, 1].scatter(
+            x2_plot,
+            y2_plot,
+            s=10,
+            alpha=0.35,
+            color="#55A868",
+            label=qq_compare_label,
+        )
+        axes[0, 1].plot(x2, intercept2 + slope2 * x2, color="#1F7A4C", lw=1.8, alpha=0.9)
+
+    axes[0, 1].set_xlabel("Theoretical Quantiles")
+    axes[0, 1].set_ylabel("Sample Quantiles")
     axes[0, 1].set_title(f"{title_prefix}Normal Q-Q")
+    axes[0, 1].legend(loc="best", fontsize=8)
 
     # 3. Scale-Location
-    axes[1, 0].scatter(fitted, sqrt_abs_std, alpha=0.3, s=10, color="#55A868")
+    axes[1, 0].scatter(
+        fitted_arr[finite_main], sqrt_abs_std, alpha=0.3, s=10, color="#55A868"
+    )
     axes[1, 0].set_xlabel("Fitted Values")
     axes[1, 0].set_ylabel(r"$\sqrt{|Standardized\ Residuals|}$")
     axes[1, 0].set_title(f"{title_prefix}Scale-Location")
     try:
-        smooth2 = lowess(sqrt_abs_std, fitted, frac=0.3)
+        smooth2 = lowess(sqrt_abs_std, fitted_arr[finite_main], frac=0.3)
         axes[1, 0].plot(smooth2[:, 0], smooth2[:, 1], color="red", lw=2)
     except Exception:
         pass
