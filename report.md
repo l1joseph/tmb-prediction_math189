@@ -10,6 +10,10 @@ Tumor mutational burden has become one of the most clinically consequential biom
 
 This project addresses three research questions. First, which patient-level variables explain the largest share of variation in TMB? Second, how well can a parsimonious model identify TMB-high tumors? Third, how sensitive are inferences to heavy-tailed outliers such as hypermutators? We approach these questions using a TCGA Pan-Cancer dataset that combines clinical demographics, mutation counts, MSI metrics, and copy-number summaries, analyzed through progressive linear regression, interaction modeling, and Firth's bias-corrected logistic regression.
 
+### 1.1 Prior Work
+
+Several prior studies have characterized TMB variation using the TCGA Pan-Cancer Atlas and related datasets, though none have adopted the unified progressive regression framework used here. Chalmers et al. (2017) analyzed over 100,000 cancer genomes from the FoundationOne CDx panel and established the landscape of TMB across cancer types, demonstrating wide variation and identifying melanoma, lung, and bladder cancers as consistently high-TMB disease groups. Their analysis was descriptive rather than regression-based and did not attempt to quantify the relative contributions of clinical covariates. Samstein et al. (2019) linked TMB to immunotherapy outcomes across 1,662 patients treated with checkpoint inhibitors, establishing that higher TMB correlates with improved overall survival across most cancer types, but did not model TMB itself as a dependent variable. Hoadley et al. (2018) performed an integrated molecular classification of TCGA tumors, showing that cell-of-origin patterns dominate molecular subtypes, which motivates our inclusion of cancer type as the primary predictor. The TCGA Pan-Cancer Atlas publications by Liu et al. (2018) and Taylor et al. (2018) provided the clinical and copy-number datasets used here but did not perform regression analyses on TMB. Our contribution is to integrate these data sources into a single regression framework that quantifies the incremental explanatory power of each variable, tests for biologically motivated interactions, and applies Firth's penalized logistic regression to handle the quasi-complete separation that arises in rare cancer subtypes.
+
 ## 2. Data Sources and Cohort Construction
 
 ### 2.1 Raw Data Sources
@@ -49,13 +53,19 @@ Between-cancer-type variation in TMB is substantial (Figures 2-3). Melanoma and 
 
 ![Figure 4: TMB-high prevalence by cancer type.](figures/tmb_high_prevalence.png)
 
-MSI-H tumors tend to have markedly higher TMB than MSS tumors, reflecting the elevated point mutation rate caused by defective DNA mismatch repair (Figure 5). Aneuploidy score and fraction genome altered are positively correlated with each other (both measure genomic instability at different scales) but show weaker and more complex relationships with TMB (Figure 6). The correlation heatmap reveals that aneuploidy and FGA are moderately correlated, motivating multicollinearity assessment in the regression models (Figure 7).
+Predictor distributions are examined prior to modeling. Among continuous predictors, age at diagnosis is approximately normally distributed (median ~60 years), while aneuploidy score and fraction genome altered are right-skewed with modes near zero. Categorical predictors show imbalanced classes: the cohort is roughly balanced by sex, but MSI-H tumors comprise only a small minority and WGD-positive tumors account for approximately one-third of samples (Figures 5-6).
 
-![Figure 5: Bivariate relationships between continuous predictors and log-TMB.](figures/bivariate_continuous.png)
+![Figure 5: Distributions of continuous predictors (age, aneuploidy score, fraction genome altered).](figures/predictor_distributions_continuous.png)
 
-![Figure 6: Bivariate relationships between categorical predictors and log-TMB.](figures/bivariate_categorical.png)
+![Figure 6: Distributions of categorical predictors (sex, MSI status, WGD status).](figures/predictor_distributions_categorical.png)
 
-![Figure 7: Correlation heatmap of numeric predictors.](figures/correlation_heatmap.png)
+MSI-H tumors tend to have markedly higher TMB than MSS tumors, reflecting the elevated point mutation rate caused by defective DNA mismatch repair (Figure 7). Aneuploidy score and fraction genome altered are positively correlated with each other (both measure genomic instability at different scales) but show weaker and more complex relationships with TMB (Figure 10). The correlation heatmap reveals that aneuploidy and FGA are moderately correlated, motivating multicollinearity assessment in the regression models (Figure 9).
+
+![Figure 7: Bivariate relationships between continuous predictors and log-TMB.](figures/bivariate_continuous.png)
+
+![Figure 8: Bivariate relationships between categorical predictors and log-TMB.](figures/bivariate_categorical.png)
+
+![Figure 9: Correlation heatmap of numeric predictors.](figures/correlation_heatmap.png)
 
 ## 4. Linear Regression Results
 
@@ -87,9 +97,9 @@ After excluding 178 hypermutators (n = 8,887):
 | M6 | + Fraction genome altered | 0.6212 | +0.002 |
 | M7 | + Whole-genome doubling | 0.6237 | +0.003 |
 
-![Figure 8: Progressive adjusted R-squared as predictors are added sequentially.](figures/progressive_r2.png)
+![Figure 10: Progressive adjusted R-squared as predictors are added sequentially.](figures/progressive_r2.png)
 
-The progression reveals a clear hierarchy (Figure 8). Cancer type alone explains approximately 42-50% of the variance in log-TMB, reflecting the fundamental biological differences in mutational processes across tissue types. Adding MSI status provides the second-largest increment (approximately 10-11 percentage points), consistent with the dramatic elevation in mutation rates caused by mismatch repair deficiency. Age contributes modestly as a univariate predictor (R-squared = 0.065-0.084), reflecting the accumulation of clock-like somatic mutations over a lifetime, but much of its signal is absorbed by cancer type since age distributions differ across cancer types. Sex adds negligible explanatory power. Aneuploidy score, fraction genome altered, and WGD status each contribute small but statistically significant increments. Excluding hypermutators improves overall model fit from 0.551 to 0.624, indicating that extreme outliers degrade the linear model's ability to capture the main signal.
+The progression reveals a clear hierarchy (Figure 10). Cancer type alone explains approximately 42-50% of the variance in log-TMB, reflecting the fundamental biological differences in mutational processes across tissue types. Adding MSI status provides the second-largest increment (approximately 10-11 percentage points), consistent with the dramatic elevation in mutation rates caused by mismatch repair deficiency. Age contributes modestly as a univariate predictor (R-squared = 0.065-0.084), reflecting the accumulation of clock-like somatic mutations over a lifetime, but much of its signal is absorbed by cancer type since age distributions differ across cancer types. Sex adds negligible explanatory power. Aneuploidy score, fraction genome altered, and WGD status each contribute small but statistically significant increments. Excluding hypermutators improves overall model fit from 0.551 to 0.624, indicating that extreme outliers degrade the linear model's ability to capture the main signal.
 
 ### 4.2 Full Model Coefficients
 
@@ -105,7 +115,7 @@ The full additive model on the non-hypermutator subset yields the following key 
 | Aneuploidy score | -0.002 | 0.001 | -1.5 | 0.146 |
 | Fraction genome altered | 0.242 | 0.034 | 7.2 | 6.7 x 10^-13 |
 
-![Figure 9: Forest plot of full model coefficient estimates with 95% confidence intervals.](figures/coefficient_forest_plot.png)
+![Figure 11: Forest plot of full model coefficient estimates with 95% confidence intervals.](figures/coefficient_forest_plot.png)
 
 The MSI coefficient dominates: MSS tumors have log-TMB approximately 1.74 units lower than MSI-H tumors, holding all else constant. This translates to roughly a 5.7-fold difference in TMB on the original scale. Age contributes about 0.005 log-TMB units per year, meaning that a 20-year age difference corresponds to approximately a 10% increase in TMB. Whole-genome doubling is associated with a 0.13 unit increase in log-TMB, and fraction genome altered shows a positive association (0.24 per unit increase). Aneuploidy score, notably, is not significant after adjustment for the other predictors (p = 0.146), suggesting that its marginal association with TMB is largely captured by cancer type, MSI, and FGA.
 
@@ -117,29 +127,29 @@ The Breusch-Pagan test detects significant heteroscedasticity (LM = 693.7, p = 2
 
 Two biologically motivated interaction terms are tested via partial F-tests against the full additive model.
 
-The age-by-cancer-type interaction is significant (F = 4.935, p = 2.2 x 10^-16) but contributes only a modest increment to explained variance (delta adjusted R-squared = +0.005). Visualization of cancer-type-specific age slopes reveals heterogeneous relationships (Figure 10): some cancer types show steep positive age-TMB slopes consistent with clock-like mutational processes, while others (notably melanoma) show flat or slightly negative slopes, consistent with exogenous mutagen-driven mutation accumulation that is less dependent on patient age. A forest plot of per-cancer-type age coefficients (Figure 11) further quantifies this heterogeneity. This pattern aligns with the hypothesis that UV-induced mutations in melanoma and tobacco-related mutations in lung cancer operate on timescales decoupled from aging.
+The age-by-cancer-type interaction is significant (F = 4.935, p = 2.2 x 10^-16) but contributes only a modest increment to explained variance (delta adjusted R-squared = +0.005). Visualization of cancer-type-specific age slopes reveals heterogeneous relationships (Figure 12): some cancer types show steep positive age-TMB slopes consistent with clock-like mutational processes, while others (notably melanoma) show flat or slightly negative slopes, consistent with exogenous mutagen-driven mutation accumulation that is less dependent on patient age. A forest plot of per-cancer-type age coefficients (Figure 13) further quantifies this heterogeneity. This pattern aligns with the hypothesis that UV-induced mutations in melanoma and tobacco-related mutations in lung cancer operate on timescales decoupled from aging.
 
-![Figure 10: Age vs log-TMB with cancer-type-specific regression lines for the eight largest cancer types.](figures/interaction_age_cancer_type.png)
+![Figure 12: Age vs log-TMB with cancer-type-specific regression lines for the eight largest cancer types.](figures/interaction_age_cancer_type.png)
 
-![Figure 11: Forest plot of cancer-type-specific age slopes with 95% confidence intervals. Red indicates statistical significance at p < 0.05.](figures/age_slopes_by_cancer_type.png)
+![Figure 13: Forest plot of cancer-type-specific age slopes with 95% confidence intervals. Red indicates statistical significance at p < 0.05.](figures/age_slopes_by_cancer_type.png)
 
-The MSI-by-aneuploidy interaction is also significant (F = 118.9, p < 10^-16, delta adjusted R-squared = +0.005). MSI-H and MSS tumors exhibit qualitatively different aneuploidy-TMB relationships (Figure 12): MSI-H tumors tend to have low aneuploidy despite very high TMB, while MSS tumors show a weak positive correlation between aneuploidy and TMB. This reflects the well-established dichotomy between microsatellite instability (point mutation-driven) and chromosomal instability (structural alteration-driven) pathways in cancer.
+The MSI-by-aneuploidy interaction is also significant (F = 118.9, p < 10^-16, delta adjusted R-squared = +0.005). MSI-H and MSS tumors exhibit qualitatively different aneuploidy-TMB relationships (Figure 14): MSI-H tumors tend to have low aneuploidy despite very high TMB, while MSS tumors show a weak positive correlation between aneuploidy and TMB. This reflects the well-established dichotomy between microsatellite instability (point mutation-driven) and chromosomal instability (structural alteration-driven) pathways in cancer.
 
-![Figure 12: Aneuploidy vs log-TMB stratified by MSI status, showing divergent slopes for MSI-H and MSS tumors.](figures/interaction_msi_aneuploidy.png)
+![Figure 14: Aneuploidy vs log-TMB stratified by MSI status, showing divergent slopes for MSI-H and MSS tumors.](figures/interaction_msi_aneuploidy.png)
 
 ### 4.5 Residualization: Within-Type Predictor Effects
 
 To assess whether predictors retain explanatory power after removing the dominant effects of cancer type and MSI, we fit a two-stage residualization analysis. First, log-TMB is regressed on cancer type and MSI status alone (adjusted R-squared = 0.606). The residuals from this model represent within-type, within-MSI-class variation in TMB. These residuals are then regressed on the remaining continuous and categorical predictors.
 
-The residual model achieves an adjusted R-squared of only 0.033, indicating that age, sex, aneuploidy, FGA, and WGD together explain about 3.3% of the within-type variance in log-TMB. Coefficient estimates in the residualized model are broadly consistent with the full model (age: 0.004 vs 0.005, FGA: 0.181 vs 0.242, WGD: 0.138 vs 0.130), confirming that cancer type and MSI act primarily as intercept shifts rather than confounders of the continuous predictors. This means the continuous predictor effects are genuine within-type associations, not artifacts of between-type differences (Figure 13).
+The residual model achieves an adjusted R-squared of only 0.033, indicating that age, sex, aneuploidy, FGA, and WGD together explain about 3.3% of the within-type variance in log-TMB. Coefficient estimates in the residualized model are broadly consistent with the full model (age: 0.004 vs 0.005, FGA: 0.181 vs 0.242, WGD: 0.138 vs 0.130), confirming that cancer type and MSI act primarily as intercept shifts rather than confounders of the continuous predictors. This means the continuous predictor effects are genuine within-type associations, not artifacts of between-type differences (Figure 15).
 
-![Figure 13: Scatter plots of residualized log-TMB (after removing cancer type and MSI effects) against age, aneuploidy score, and fraction genome altered.](figures/residualized_scatter_plots.png)
+![Figure 15: Scatter plots of residualized log-TMB (after removing cancer type and MSI effects) against age, aneuploidy score, and fraction genome altered.](figures/residualized_scatter_plots.png)
 
 ### 4.6 Multicollinearity Assessment
 
-Variance inflation factors for the numeric predictors are all below 5 (maximum VIF = 3.36), indicating no serious multicollinearity concerns (Figure 14). Aneuploidy score and fraction genome altered are biologically correlated (both measure genomic instability), but their VIF values remain moderate, supporting their joint inclusion in the model.
+Variance inflation factors for the numeric predictors are all below 5 (maximum VIF = 3.36), indicating no serious multicollinearity concerns (Figure 16). Aneuploidy score and fraction genome altered are biologically correlated (both measure genomic instability), but their VIF values remain moderate, supporting their joint inclusion in the model.
 
-![Figure 14: Variance inflation factors for numeric predictors.](figures/vif_analysis.png)
+![Figure 16: Variance inflation factors for numeric predictors.](figures/vif_analysis.png)
 
 ## 5. Model Diagnostics
 
@@ -147,25 +157,25 @@ Variance inflation factors for the numeric predictors are all below 5 (maximum V
 
 Residual diagnostics reveal departures from ideal OLS assumptions that are expected given the data structure (Figures 15-16). On the full cohort, residuals exhibit substantial right-skew (skewness = 2.256) and heavy tails (excess kurtosis = 14.6), driven primarily by hypermutator samples. Excluding hypermutators markedly improves residual behavior: skewness drops to 0.572 and excess kurtosis to 4.6. While still departing from normality, this level of non-normality is unlikely to meaningfully bias coefficient estimates or standard errors at the sample sizes involved (n approximately 9,000), particularly when supplemented with HC3 robust inference.
 
-![Figure 15: Four-panel residual diagnostics: residuals vs fitted, Q-Q plot, scale-location, and residuals vs leverage.](figures/diagnostics_residuals_4panel.png)
+![Figure 17: Four-panel residual diagnostics: residuals vs fitted, Q-Q plot, scale-location, and residuals vs leverage.](figures/diagnostics_residuals_4panel.png)
 
-![Figure 16: Residual comparison between full cohort and non-hypermutator subset.](figures/residuals_comparison.png)
+![Figure 18: Residual comparison between full cohort and non-hypermutator subset.](figures/residuals_comparison.png)
 
 The Breusch-Pagan test confirms heteroscedasticity, with residual variance increasing for higher fitted values. This pattern reflects the biological reality that cancer types with high TMB also tend to have high TMB variance. The HC3 correction addresses this for inferential purposes without requiring model re-specification.
 
 ### 5.2 Influential Observations
 
-Cook's distance analysis identifies a meaningful number of influential observations (Figure 17), disproportionately concentrated in melanoma (65.3% of melanoma observations exceed the 4/n threshold), mature B-cell neoplasms (35.1%), and adrenocortical carcinoma (15.9%). These cancer types have small sample sizes or extreme TMB values that exert outsized leverage on the regression surface. DFBETAS analysis confirms that individual observations can meaningfully shift the age coefficient, though no single observation dominates the overall fit (Figure 18).
+Cook's distance analysis identifies a meaningful number of influential observations (Figure 19), disproportionately concentrated in melanoma (65.3% of melanoma observations exceed the 4/n threshold), mature B-cell neoplasms (35.1%), and adrenocortical carcinoma (15.9%). These cancer types have small sample sizes or extreme TMB values that exert outsized leverage on the regression surface. DFBETAS analysis confirms that individual observations can meaningfully shift the age coefficient, though no single observation dominates the overall fit (Figure 20).
 
-![Figure 17: Cook's distance for all observations, with the 4/n threshold line.](figures/diagnostics_cooks_distance.png)
+![Figure 19: Cook's distance for all observations, with the 4/n threshold line.](figures/diagnostics_cooks_distance.png)
 
-![Figure 18: DFBETAS for the age coefficient, identifying observations with outsized influence.](figures/diagnostics_dfbetas_age.png)
+![Figure 20: DFBETAS for the age coefficient, identifying observations with outsized influence.](figures/diagnostics_dfbetas_age.png)
 
 ### 5.3 Robust Regression
 
-Huber M-estimator robust regression downweights influential observations and provides a sensitivity check on OLS coefficient estimates (Figure 19). Most coefficients shift by less than 10% between OLS and robust estimation (WGD: -0.6%, FGA: -3.0%, age: -10.2%), confirming stability. The MSI coefficient shifts by 12.9% (from -1.74 to -1.97), suggesting that the robust estimator assigns slightly more weight to the majority of MSS observations. The sex coefficient shows the largest relative change (44.8%), though both estimates are small in absolute magnitude (0.037 OLS vs 0.020 robust), and the variable is marginally significant in either case.
+Huber M-estimator robust regression downweights influential observations and provides a sensitivity check on OLS coefficient estimates (Figure 21). Most coefficients shift by less than 10% between OLS and robust estimation (WGD: -0.6%, FGA: -3.0%, age: -10.2%), confirming stability. The MSI coefficient shifts by 12.9% (from -1.74 to -1.97), suggesting that the robust estimator assigns slightly more weight to the majority of MSS observations. The sex coefficient shows the largest relative change (44.8%), though both estimates are small in absolute magnitude (0.037 OLS vs 0.020 robust), and the variable is marginally significant in either case.
 
-![Figure 19: Forest plot comparing OLS and Huber robust regression coefficient estimates.](figures/robust_vs_ols_forest.png)
+![Figure 21: Forest plot comparing OLS and Huber robust regression coefficient estimates.](figures/robust_vs_ols_forest.png)
 
 ### 5.4 Sensitivity Analysis
 
@@ -175,11 +185,11 @@ Excluding melanoma and endometrial cancer, the two cancer types with the most ex
 
 ### 6.1 Standard Logistic Regression
 
-A standard logistic regression model predicts TMB-high status (>= 10 mut/Mb) from the same seven-predictor set. The model is fit on 9,251 complete cases and achieves an AUC of 0.911 (Figure 20), indicating good discrimination between TMB-high and TMB-low tumors. At the default 0.5 probability threshold, the model achieves 92.5% accuracy (Figure 21), with high specificity (99% for TMB-low) but moderate sensitivity (36% for TMB-high), reflecting the class imbalance (11.6% prevalence).
+A standard logistic regression model predicts TMB-high status (>= 10 mut/Mb) from the same seven-predictor set. The model is fit on 9,251 complete cases and achieves an AUC of 0.911 (Figure 22), indicating good discrimination between TMB-high and TMB-low tumors. At the default 0.5 probability threshold, the model achieves 92.5% accuracy (Figure 23), with high specificity (99% for TMB-low) but moderate sensitivity (36% for TMB-high), reflecting the class imbalance (11.6% prevalence).
 
-![Figure 20: ROC curve for standard logistic regression, AUC = 0.911.](figures/roc_curve_logistic.png)
+![Figure 22: ROC curve for standard logistic regression, AUC = 0.911.](figures/roc_curve_logistic.png)
 
-![Figure 21: Confusion matrix at the default 0.5 probability threshold.](figures/confusion_matrix_logistic.png)
+![Figure 23: Confusion matrix at the default 0.5 probability threshold.](figures/confusion_matrix_logistic.png)
 
 Standard logistic regression encounters numerical difficulties in this dataset. Five cancer types have 0% TMB-high prevalence (pleural mesothelioma, seminoma, pheochromocytoma, non-seminomatous germ cell tumors, and miscellaneous neuroepithelial tumors), and an additional nine types have prevalence below 2%. This quasi-complete separation causes the standard MLE to diverge for the corresponding cancer-type coefficients, producing NaN standard errors and confidence intervals.
 
@@ -191,9 +201,9 @@ The Firth model produces somewhat different coefficient estimates than standard 
 
 ### 6.3 Calibration and Goodness of Fit
 
-The Hosmer-Lemeshow test yields a chi-squared statistic of 13.48 (df = 8, p = 0.096), indicating adequate calibration at the 5% significance level. The calibration curve (Figure 22) shows reasonable agreement between predicted probabilities and observed event rates, though the model tends to slightly underestimate TMB-high probability in the highest-risk decile.
+The Hosmer-Lemeshow test yields a chi-squared statistic of 13.48 (df = 8, p = 0.096), indicating adequate calibration at the 5% significance level. The calibration curve (Figure 24) shows reasonable agreement between predicted probabilities and observed event rates, though the model tends to slightly underestimate TMB-high probability in the highest-risk decile.
 
-![Figure 22: Calibration plot comparing predicted probabilities to observed TMB-high rates.](figures/calibration_plot.png)
+![Figure 24: Calibration plot comparing predicted probabilities to observed TMB-high rates.](figures/calibration_plot.png)
 
 Likelihood ratio tests confirm that the full predictor set contributes significantly beyond a null model (chi-squared = 3,787, df = 34, p approximately 0) and that predictors beyond cancer type add meaningful information (chi-squared = 1,622, df = 5, p approximately 0).
 
@@ -209,7 +219,15 @@ Age and genomic instability features (aneuploidy, FGA, WGD) add modest increment
 
 Several limitations should be considered when interpreting these results. First, this analysis uses in-sample evaluation only; cross-validated or externally validated performance estimates would be lower. Second, the TMB definition used here (mutation count divided by an assumed 30 Mb exome capture size) is a proxy that may differ from clinical TMB assays such as FoundationOne CDx, which use different pipelines and panel sizes. Third, missingness is non-uniform across predictors, with MSI-related fields showing the highest rates, and complete-case analysis may introduce selection bias if missingness is not completely at random. Fourth, pan-cancer aggregation masks subtype-specific biology; pooled regression coefficients should not be interpreted as universal within every disease context. Fifth, potential residual confounding remains across the heterogeneous TCGA population, and unmeasured variables such as specific mutational signatures or treatment history may influence TMB. Finally, the Shapiro-Wilk test rejects residual normality (p < 10^-40), though at sample sizes of approximately 9,000, OLS coefficient estimates and HC3-corrected inference remain reliable despite moderate departures from normality.
 
-## 9. Conclusion
+## 9. Relation to Project Proposal
+
+This final report closely follows the analysis plan outlined in the original project proposal. The proposal specified five phases: data preparation (merging three TCGA datasets), exploratory data analysis, progressive linear regression with interaction terms, logistic regression with Firth's bias correction, and model diagnostics. All five phases were completed as proposed. The key research questions — quantifying the relative contributions of clinical and genomic features to TMB variation, evaluating TMB-high classification performance, and assessing sensitivity to outliers — are addressed directly.
+
+Two aspects of the analysis evolved during execution. First, the proposal anticipated using the `firthlogist` Python package for Firth's penalized logistic regression, but this package was incompatible with the project's Python 3.11 environment. Instead, we implemented Firth's method from scratch using iteratively reweighted least squares with a Jeffreys-prior bias correction, with Wald-type standard errors derived from the final Fisher information matrix. This custom implementation provided equivalent functionality with the additional benefit of full transparency into the optimization procedure. Second, the proposal mentioned regressing out cancer type to reveal within-type relationships but did not specify how to visualize or validate this step. We added a two-stage residualization analysis with scatter plots (Figure 15) to make the within-type predictor effects explicit, which strengthened the interpretation that age and genomic instability features are not merely proxies for cancer type.
+
+All other analyses — progressive model building, interaction F-tests with group-specific regression lines, HC3 robust inference, Cook's distance and DFBETAS diagnostics, robust regression comparison, sensitivity analysis excluding extreme cancer types, ROC/AUC evaluation, calibration assessment, and clinical discussion — were completed as proposed.
+
+## 10. Conclusion
 
 This analysis provides a systematic quantification of the clinical and genomic determinants of tumor mutational burden across 30 cancer types in the TCGA Pan-Cancer cohort. Cancer type and MSI status together explain over 60% of the variance in log-transformed TMB, establishing these as the dominant predictors. Age contributes a modest clock-like signal that varies in magnitude across cancer types, consistent with tissue-specific differences in mutational processes. Genomic instability features add small but significant incremental explanatory power. For TMB-high classification, Firth's penalized logistic regression achieves an AUC of 0.921 while providing stable inference in cancer subtypes with complete separation, making it the preferred approach for this application. These findings support the use of MSI status and cancer type as a first-line triage tool for identifying patients likely to benefit from TMB-guided immunotherapy, potentially reducing the need for comprehensive genomic profiling in low-probability populations.
 
