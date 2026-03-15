@@ -324,9 +324,26 @@ def fit_firth_logistic(
 
     pi_final = _logistic(X_design, beta)
 
+    # Wald-type standard errors from final Fisher information matrix
+    pi_se = np.clip(pi_final, 1e-10, 1 - 1e-10)
+    W_final = np.diag(pi_se * (1 - pi_se))
+    XtWX_final = X_design.T @ W_final @ X_design
+    try:
+        cov_matrix = np.linalg.inv(XtWX_final)
+    except np.linalg.LinAlgError:
+        cov_matrix = np.linalg.pinv(XtWX_final)
+    se = np.sqrt(np.maximum(np.diag(cov_matrix), 0.0))
+    z_values = np.where(se > 0, beta / se, np.zeros_like(beta))
+    p_values = 2 * (1 - sp_stats.norm.cdf(np.abs(z_values)))
+
     return {
         "coef": beta[1:].reshape(1, -1),
         "intercept": beta[0],
+        "se": se[1:],
+        "se_intercept": se[0],
+        "z_values": z_values[1:],
+        "p_values": p_values[1:],
+        "p_value_intercept": p_values[0],
         "predictions": (pi_final >= 0.5).astype(int),
         "probabilities": pi_final,
         "feature_names": feature_names,
